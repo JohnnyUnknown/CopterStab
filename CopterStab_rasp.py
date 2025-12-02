@@ -1,21 +1,21 @@
 import cv2
 import numpy as np
-# from libcamera import controls
-# from picamera2 import Picamera2
+from libcamera import controls
+from picamera2 import Picamera2
 import time
 
-# camera = Picamera2()
-# curr_fps = 120
+camera = Picamera2()
+curr_fps = 120
 img_size = 300
-# video_config = camera.create_video_configuration(
-#     main={"size": (img_size, img_size), "format": 'RGB888'},
-#     controls={"FrameRate": curr_fps,
-#             "AfMode": controls.AfModeEnum.Manual, 
-#             "LensPosition": 0.0,
-#             "AfSpeed": controls.AfSpeedEnum.Fast}
-# )
-# camera.configure(video_config)
-# camera.start()
+video_config = camera.create_video_configuration(
+    main={"size": (img_size, img_size), "format": 'RGB888'},
+    controls={"FrameRate": curr_fps,
+            "AfMode": controls.AfModeEnum.Manual, 
+            "LensPosition": 0.0,
+            "AfSpeed": controls.AfSpeedEnum.Fast}
+)
+camera.configure(video_config)
+camera.start()
 
 
 def detect_and_compute(frame, method, name_method="SIFT"):
@@ -137,10 +137,6 @@ def print_points(img, matches, center):
     
 
 def main():
-    path = r"C:\My\Projects\images\123.mp4"  # move_7   djelga_car2
-    camera = cv2.VideoCapture(path)
-
-
     name_method = "SIFT"
     method = None
     if name_method == 'SIFT':
@@ -150,9 +146,7 @@ def main():
 
     cnt, FPS, angle = 0, 0, 0
 
-    # prev_frame = camera.capture_array()
-    _, prev_frame = camera.read()
-    prev_frame = cv2.resize(prev_frame, (int(img_size/9*16), img_size))
+    prev_frame = camera.capture_array()
     prev_frame = cv2.cvtColor(prev_frame, cv2.COLOR_BGR2GRAY)
     #prev_frame = prev_frame[:img_size, :img_size]
     prev_frame = cv2.GaussianBlur(prev_frame, (5, 5), 0)
@@ -165,9 +159,7 @@ def main():
             break
             
         cnt += 1
-        # frame = camera.capture_array()
-        _, frame = camera.read()
-        frame = cv2.resize(frame, (int(img_size/9*16), img_size))
+        frame = camera.capture_array()
         frame = cv2.cvtColor(frame, cv2.COLOR_BGR2GRAY)
         #frame = frame[:img_size, :img_size]
         frame = cv2.GaussianBlur(frame, (5, 5), 0)
