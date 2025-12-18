@@ -1,21 +1,8 @@
 import cv2
 import numpy as np
-# from libcamera import controls
-# from picamera2 import Picamera2
 import time
 
-# camera = Picamera2()
-# curr_fps = 120
 img_size = 300
-# video_config = camera.create_video_configuration(
-#     main={"size": (img_size, img_size), "format": 'RGB888'},
-#     controls={"FrameRate": curr_fps,
-#             "AfMode": controls.AfModeEnum.Manual, 
-#             "LensPosition": 0.0,
-#             "AfSpeed": controls.AfSpeedEnum.Fast}
-# )
-# camera.configure(video_config)
-# camera.start()
 
 
 def detect_and_compute(frame, method, name_method="SIFT"):
@@ -137,14 +124,14 @@ def print_points(img, matches, center):
     
 
 def main():
-    path = r"C:\My\Projects\images\123.mp4"  # move_7   djelga_car2
+    path = r"C:\My\Projects\images\stab_test.mp4"  # move_7   djelga_car2
     camera = cv2.VideoCapture(path)
 
 
     name_method = "SIFT"
     method = None
     if name_method == 'SIFT':
-        method = cv2.SIFT_create(nOctaveLayers=3)
+        method = cv2.SIFT_create(nOctaveLayers=3, contrastThreshold=0.04)
     elif name_method == 'ORB':
         method = cv2.ORB_create(nfeatures=200)
 
