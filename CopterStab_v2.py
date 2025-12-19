@@ -3,7 +3,7 @@ import numpy as np
 import time
 from collections import deque
 
-min_kp, max_kp = 100, 500
+min_kp, max_kp = 100, 300
 min_match, max_match = 6, max_kp
 
 def match_descriptors(desc1, desc2, threshold_matcher, is_sift=True):
@@ -32,7 +32,7 @@ def reinitialize_SIFT(contrast, len_kp):
     return cv2.SIFT_create(contrastThreshold=contrast), contrast
 
 
-def new_treshold_matcher(threshold, len_match, max_match):
+def new_threshold_matcher(threshold, len_match, max_match):
     if len_match < min_match:
         threshold += 0.05
         if threshold > 0.7: 
@@ -44,39 +44,53 @@ def new_treshold_matcher(threshold, len_match, max_match):
     return threshold
 
 
+def filter_outlier_shift(dx, dy, history, max_deviation=30.0):
+    hist_x = [p[0] for p in history]
+    hist_y = [p[1] for p in history]
+    mean_x, mean_y = np.mean(hist_x), np.mean(hist_y)
+    is_outlier = False
+
+    if abs(dx - history[2][0]) > max_deviation:
+        print("outlier dx", dx, history[2][0], mean_x)
+        is_outlier = True
+        dx = history[2][0]  
+    if abs(dy - history[2][1]) > max_deviation:
+        print("outlier dy", dy, history[2][1], mean_y)
+        is_outlier = True
+        dy = history[2][1]
+    return dx, dy, is_outlier
+
+
 def main():
     video_path = r"C:\My\Projects\images\stab_test.mp4"
     img_h = 300
     img_w = int(img_h / 9 * 16)
+
     method_name = "SIFT"
     is_sift = method_name == "SIFT"
     contrast = 0.04
     threshold_matcher = 0.5
     detector = cv2.SIFT_create(contrastThreshold=contrast) if is_sift else cv2.ORB_create(nfeatures=200)
 
-
+    #---------------------Получение кадра--------------------------------
     cap = cv2.VideoCapture(video_path)
     if not cap.isOpened():
         raise IOError("Не удалось открыть видео")
 
-    # Первый кадр
     ret, frame = cap.read()
     if not ret:
         raise ValueError("Видео пустое")
-    
     frame = cv2.resize(frame, (img_w, img_h))
+    #---------------------------------------------------------------------
+
     prev_gray = cv2.cvtColor(frame, cv2.COLOR_BGR2GRAY)
-    # prev_gray = cv2.GaussianBlur(prev_gray, (5, 5), 2)
     prev_kp, prev_desc = detector.detectAndCompute(prev_gray, None)
 
     H, W = prev_gray.shape
     first_center = np.array([[[W / 2, H / 2]]], dtype=np.float32)
-    shifts_buffer = deque([(first_center[0, 0, 0], first_center[0, 0, 1]), 
-                           (first_center[0, 0, 0], first_center[0, 0, 1]), 
-                           (first_center[0, 0, 0], first_center[0, 0, 1])], maxlen=3)
+    shifts_buffer = deque([(0, 0)] * 3, maxlen=3)
     H_cumulative = np.eye(3, dtype=np.float32)
     # angle_accum = 0.0
-
 
     # === Цикл обработки ===
     start_time = time.perf_counter()
@@ -87,65 +101,56 @@ def main():
         if cv2.waitKey(1) & 0xFF == ord('q'):
             break
 
+        #---------------------Получение кадра--------------------------------
         ret, frame = cap.read()
         if not ret:
             break
-
-        # Обработка кадра
         frame = cv2.resize(frame, (img_w, img_h))
+        #---------------------------------------------------------------------
+
         curr_gray = cv2.cvtColor(frame, cv2.COLOR_BGR2GRAY)
-        # curr_gray = cv2.GaussianBlur(curr_gray, (5, 5), 2)
         curr_kp, curr_desc = detector.detectAndCompute(curr_gray, None)
 
         if len(curr_kp) < min_kp or len(curr_kp) > max_kp:
             detector, contrast = reinitialize_SIFT(contrast, len(curr_kp))
-            prev_kp, prev_desc = detector.detectAndCompute(curr_gray, None)
-            continue
+            curr_kp, curr_desc = detector.detectAndCompute(curr_gray, None)
 
         max_match = int(min(len(prev_kp), len(curr_kp)) * 0.99)
-        # print(max_match, len(prev_kp), len(curr_kp))
         matches = match_descriptors(prev_desc, curr_desc, threshold_matcher, is_sift)
 
         if len(matches) < min_match or len(matches) > max_match:
-            threshold_matcher = new_treshold_matcher(threshold_matcher, len(matches), max_match)
+            threshold_matcher = new_threshold_matcher(threshold_matcher, len(matches), max_match)
             matches = match_descriptors(prev_desc, curr_desc, threshold_matcher, is_sift)
-            # print(threshold_matcher, len(matches))
-
 
         # Инициализация
         center = None
-        tracking_ok = False
-
 
         if matches and len(matches) >= min_match:
             # Гомография для центра
             src_pts = np.float32([prev_kp[m.queryIdx].pt for m in matches])
             dst_pts = np.float32([curr_kp[m.trainIdx].pt for m in matches])
-            H_local, _ = cv2.findHomography(src_pts, dst_pts, cv2.RANSAC, ransacReprojThreshold=3.0)
+            H_local, inliers_mask = cv2.findHomography(src_pts, dst_pts, cv2.RANSAC, 3.0)
 
-            if H_local is not None:
+            if H_local is not None and inliers_mask.sum() >= 10:
                 H_total = H_local @ H_cumulative
                 try:
                     proj = cv2.perspectiveTransform(first_center, H_total)
                     center = (proj[0, 0, 0], proj[0, 0, 1])
-                    shifts_buffer.append(center)
-                    tracking_ok = True
+                    dx = center[0] - W / 2
+                    dy = H / 2 - center[1]
+                    dx, dy, is_outlier = filter_outlier_shift(dx, dy, shifts_buffer)
+                    shifts_buffer.append((dx, dy))
+                    if not is_outlier:
+                        H_cumulative = H_total
                 except:
-                    tracking_ok = False
+                    print("Трекинг потерян")
 
             # # Угол между соседними кадрами
-            # rel_angle = compute_relative_angle(src_pts, dst_pts)
+            # rel_angle = compute_relative_angle(prev_kp, curr_kp, matches)
             # angle_accum = (angle_accum + rel_angle) % 360
 
-            # Обновление опорного кадра при успешном трекинге
-            if tracking_ok:
-                prev_gray, prev_kp, prev_desc = curr_gray, curr_kp, curr_desc
-                H_cumulative = H_total
-        else:
-            proj = np.mean(shifts_buffer[0, 0, 0], shifts_buffer[1, 0, 0], shifts_buffer[2, 0, 0])
-            print(proj)
-
-
+            prev_gray, prev_kp, prev_desc = curr_gray, curr_kp, curr_desc
+            
         # FPS
         frame_count += 1
         if time.perf_counter() - start_time >= 1.0:
@@ -155,10 +160,8 @@ def main():
 
         # Визуализация
         display = frame.copy()
-        if center:
-            cv2.circle(display, (int(proj[0, 0, 0]), int(proj[0, 0, 1])), 2, (0, 0, 255), 2)
-            dx = center[0] - W / 2
-            dy = H / 2 - center[1]
+        if center and not is_outlier:
+            cv2.circle(display, (int(W/2+dx), int(H/2-dy)), 2, (0, 0, 255), 2)
             # text = f"dx:{dx:+.1f}, dy:{dy:+.1f}, angle:{angle_accum:.1f} | FPS: {fps}"
             text = f"dx:{dx:+.1f}, dy:{dy:+.1f}, FPS: {fps}"
             cv2.putText(display, text, (5, 25), cv2.FONT_HERSHEY_SIMPLEX, 0.6, (0, 0, 255), 2)
